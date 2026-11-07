@@ -334,7 +334,7 @@ export default function AdminDashboard() {
                         </div>
                         <div className="text-right">
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold inline-block mb-0.5 ${rider.status === 'AVAILABLE' ? 'bg-emerald-500/20 text-emerald-400' :
-                              rider.status === 'BUSY' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-400'
+                            rider.status === 'BUSY' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-400'
                             }`}>
                             {rider.status}
                           </span>
@@ -475,10 +475,10 @@ export default function AdminDashboard() {
                         <td className="py-3 font-semibold text-emerald-400">₱{order.deliveryFee}</td>
                         <td className="py-3">
                           <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${order.status === 'DELIVERED' ? 'bg-emerald-500/20 text-emerald-400' :
-                              order.status === 'ACCEPTED' ? 'bg-blue-500/20 text-blue-400' :
-                                order.status === 'ABANDONED' ? 'bg-rose-500/20 text-rose-500 font-bold' :
-                                  order.status === 'OFFERED' ? 'bg-amber-500/20 text-amber-400 animate-pulse' :
-                                    'bg-slate-800 text-slate-400'
+                            order.status === 'ACCEPTED' ? 'bg-blue-500/20 text-blue-400' :
+                              order.status === 'ABANDONED' ? 'bg-rose-500/20 text-rose-500 font-bold' :
+                                order.status === 'OFFERED' ? 'bg-amber-500/20 text-amber-400 animate-pulse' :
+                                  'bg-slate-800 text-slate-400'
                             }`}>
                             {order.status}
                           </span>

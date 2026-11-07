@@ -40,9 +40,9 @@ export async function GET() {
         deliveredCount++;
         totalRevenue += ord.deliveryFee || 0;
 
-        if (ord.acceptedAt && (ord.completedAt || ord.updatedAt)) {
+        if (ord.acceptedAt && ord.completedAt) {
           const start = new Date(ord.acceptedAt).getTime();
-          const end = new Date(ord.completedAt || ord.updatedAt).getTime();
+          const end = new Date(ord.completedAt).getTime();
           const secs = Math.floor((end - start) / 1000);
           if (secs > 0) {
             totalDeliverySeconds += secs;

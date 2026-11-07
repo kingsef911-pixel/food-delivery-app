@@ -4,14 +4,14 @@ import { Order, User } from '@/lib/models';
 import { dispatchOrderToNextRider } from '@/lib/dispatch';
 
 /**
- * Checks for expired order offers (older than 45s) and handles auto-decline / re-dispatch.
+ * Checks for expired order offers (older than 45s) and handles auto-decline / re-dispatch atomically.
  */
 export async function checkExpiredOffers() {
   try {
     await connectToDatabase();
     const now = new Date();
 
-    // 1. Find all orders in OFFERED state whose offer window has expired
+    // 1. Find all eligible expired orders
     const expiredOrders = await Order.find({
       status: 'OFFERED',
       offerExpiresAt: { $lte: now },
@@ -21,8 +21,19 @@ export async function checkExpiredOffers() {
 
     let processedCount = 0;
 
-    for (const order of expiredOrders) {
-      const riderId = order.currentRiderId;
+    for (const rawOrder of expiredOrders) {
+      // ATOMIC CLAIM: Ensure only one process can transition this specific expired order 
+      // from 'OFFERED' to 'PENDING_ASSIGNMENT' due to timeout.
+      const order = await Order.findOneAndUpdate(
+        { _id: rawOrder._id, status: 'OFFERED', offerExpiresAt: { $lte: now } },
+        { $set: { status: 'PENDING_ASSIGNMENT', currentRiderId: null, offerExpiresAt: null } },
+        { new: true }
+      );
+
+      // If another cron thread already grabbed and processed this order, skip it safely.
+      if (!order) continue;
+
+      const riderId = rawOrder.currentRiderId;
 
       if (riderId) {
         const rider = await User.findById(riderId);
@@ -34,6 +45,7 @@ export async function checkExpiredOffers() {
             action: 'TIMEOUT',
             timestamp: new Date(),
           });
+          await order.save();
 
           // Update rider status to AVAILABLE, increment decline/timeout count, move to bottom of queue
           rider.status = 'AVAILABLE';

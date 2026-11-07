@@ -1,11 +1,13 @@
+// app/api/cron/check-timeouts/route.ts (or your timeout endpoint path)
 import { NextResponse } from 'next/server';
 import mongoose from 'mongoose';
 import { Order, User } from '@/lib/models';
+import { dispatchOrderToNextRider } from '@/lib/dispatch';
+import { logEvent } from '@/lib/utils/logger';
 
 async function ensureDB() {
   if (mongoose.connection.readyState === 1) return;
   if (mongoose.connection.readyState === 2) {
-    // If currently connecting, wait for it
     await new Promise((resolve) => {
       mongoose.connection.once('connected', resolve);
     });
@@ -24,17 +26,36 @@ export async function GET() {
       offerExpiresAt: { $lt: now },
     });
 
+    let reDispatchedCount = 0;
+
     for (const order of expiredOrders) {
-      if (order.currentRiderId) {
+      const riderId = order.currentRiderId;
+
+      if (riderId) {
         order.assignmentHistory.push({
-          riderId: order.currentRiderId,
+          riderId: riderId,
           action: 'TIMEOUT',
           timestamp: new Date(),
         });
 
-        await User.findByIdAndUpdate(order.currentRiderId, {
+        // Find highest queue position for rotation
+        const highestQueueRider = await User.findOne({ role: 'RIDER', status: 'AVAILABLE' }).sort({ queuePosition: -1 });
+        const nextQueuePos = highestQueueRider ? highestQueueRider.queuePosition + 1 : 1;
+
+        // Release rider, increment decline/timeout, and push to back of queue
+        await User.findByIdAndUpdate(riderId, {
           status: 'AVAILABLE',
           $inc: { declineCount: 1 },
+          queuePosition: nextQueuePos,
+        });
+
+        // Log timeout event
+        await logEvent({
+          userId: riderId.toString(),
+          userRole: 'RIDER',
+          action: 'ORDER_TIMEOUT',
+          targetId: order._id.toString(),
+          details: { orderNumber: order.orderNumber },
         });
       }
 
@@ -42,9 +63,19 @@ export async function GET() {
       order.currentRiderId = undefined;
       order.offerExpiresAt = undefined;
       await order.save();
+
+      // **THE MISSING PIECE:** Forward the order to the next available rider!
+      const dispatchResult = await dispatchOrderToNextRider(order._id.toString());
+      if (dispatchResult.success) {
+        reDispatchedCount++;
+      }
     }
 
-    return NextResponse.json({ success: true, expiredProcessed: expiredOrders.length });
+    return NextResponse.json({ 
+      success: true, 
+      expiredProcessed: expiredOrders.length,
+      reDispatched: reDispatchedCount 
+    });
   } catch (error: any) {
     console.error('SERVER CRON ERROR (timeouts):', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

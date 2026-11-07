@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/db';
 import { User } from '@/lib/models';
+import { logEvent } from '@/lib/utils/logger';
 
 export async function POST(request: Request) {
   try {
@@ -18,12 +19,29 @@ export async function POST(request: Request) {
     });
 
     if (!user || user.password !== password) { // Note: use bcrypt.compare in production
+      // Optional: Log failed login attempts for security monitoring
+      await logEvent({
+        userRole: 'GUEST',
+        action: 'LOGIN_FAILED',
+        details: { attemptedCredential: emailOrPhone, reason: 'Invalid credentials' },
+        ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+      });
+
       return NextResponse.json({ success: false, error: 'Invalid credentials.' }, { status: 401 });
     }
 
     if (user.isSuspended) {
       return NextResponse.json({ success: false, error: 'Account is suspended. Contact admin.' }, { status: 403 });
     }
+
+    // LOG SUCCESSFUL LOGIN EVENT
+    await logEvent({
+      userId: user._id.toString(),
+      userRole: user.role,
+      action: 'USER_LOGIN',
+      details: { phone: user.phone, name: user.name },
+      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+    });
 
     // Return user session payload (In production, sign a secure HTTP-only JWT cookie here)
     const response = NextResponse.json({

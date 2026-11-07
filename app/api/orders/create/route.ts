@@ -4,6 +4,7 @@ import { connectToDatabase } from '@/lib/db';
 import { Customer, Order } from '@/lib/models';
 import { calculateDistanceAndFee } from '@/lib/utils/maps';
 import { dispatchOrderToNextRider } from '@/lib/dispatch';
+import { logEvent } from '@/lib/utils/logger'; // <-- Import the audit logger
 
 export async function POST(request: Request) {
   try {
@@ -77,6 +78,21 @@ export async function POST(request: Request) {
     });
 
     const dispatchResult = await dispatchOrderToNextRider(newOrder._id.toString());
+
+    // LOG SUCCESSFUL ORDER CREATION & DISPATCH INITIATION
+    await logEvent({
+      userRole: 'ADMIN', // Or extract from request session if available
+      action: 'ORDER_CREATED',
+      targetId: newOrder._id.toString(),
+      details: {
+        orderNumber,
+        customerName,
+        deliveryFee,
+        distanceKm,
+        dispatchStatus: dispatchResult,
+      },
+      ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+    });
 
     return NextResponse.json({
       success: true,

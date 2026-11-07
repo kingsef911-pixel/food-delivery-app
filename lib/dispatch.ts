@@ -1,6 +1,7 @@
 // lib/dispatch.ts
 import { User, Order } from '@/lib/models';
 import { sendSemaphoreSms } from '@/lib/utils/sms';
+import { logEvent } from '@/lib/utils/logger'; // <-- Import the audit logger
 
 /**
  * Automatically assigns a pending order to the next available rider in the FIFO queue.
@@ -29,6 +30,14 @@ export async function dispatchOrderToNextRider(orderId: string) {
 
       console.warn(`[FALLBACK TRIGGERED] Order #${order.orderNumber} placed in UNASSIGNED_ALERT state. No available riders online.`);
 
+      // Log fallback trigger
+      await logEvent({
+        userRole: 'SYSTEM',
+        action: 'ORDER_FALLBACK_UNASSIGNED',
+        targetId: order._id.toString(),
+        details: { orderNumber: order.orderNumber, reason: 'No available riders online' },
+      });
+
       // Optional Admin SMS Fallback Alert
       const adminPhone = process.env.ADMIN_ALERT_PHONE;
       if (adminPhone) {
@@ -56,6 +65,15 @@ export async function dispatchOrderToNextRider(orderId: string) {
       timestamp: new Date(),
     });
     await order.save();
+
+    // Log order offer event
+    await logEvent({
+      userId: nextRider._id.toString(),
+      userRole: 'RIDER',
+      action: 'ORDER_OFFERED',
+      targetId: order._id.toString(),
+      details: { orderNumber: order.orderNumber, riderName: nextRider.name, expiresAt },
+    });
 
     // 3. Send SMS dispatch notification with secure action link
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
@@ -110,6 +128,15 @@ export async function handleRiderDecline(orderId: string, riderId: string) {
     timestamp: new Date(),
   });
   await order.save();
+
+  // Log rider decline event
+  await logEvent({
+    userId: rider._id.toString(),
+    userRole: 'RIDER',
+    action: 'ORDER_DECLINED',
+    targetId: order._id.toString(),
+    details: { orderNumber: order.orderNumber, riderName: rider.name },
+  });
 
   // 2. Increment rider decline count, set status to AVAILABLE, and move to bottom of queue
   rider.status = 'AVAILABLE';

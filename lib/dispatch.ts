@@ -12,12 +12,13 @@ export async function dispatchOrderToNextRider(orderId: string) {
       return { success: false, message: 'Order is no longer eligible for dispatch.' };
     }
 
-    // 1. Find the next available rider in the FIFO queue
-    // Sorted by queuePosition ascending (lowest position = available the longest)
-    const nextRider = await User.findOne({
-      role: 'RIDER',
-      status: 'AVAILABLE',
-    }).sort({ queuePosition: 1, updatedAt: 1 });
+    // 1. Atomically find and claim the next available rider in the FIFO queue
+    // This prevents concurrent dispatches from assigning the same rider simultaneously.
+    const nextRider = await User.findOneAndUpdate(
+      { role: 'RIDER', status: 'AVAILABLE' },
+      { $set: { status: 'BUSY' } },
+      { sort: { queuePosition: 1, updatedAt: 1 }, new: true }
+    );
 
     // FALLBACK 1: No riders currently available
     if (!nextRider) {
@@ -55,10 +56,6 @@ export async function dispatchOrderToNextRider(orderId: string) {
       timestamp: new Date(),
     });
     await order.save();
-    
-    // Mark rider as BUSY so they are not assigned multiple orders simultaneously
-    nextRider.status = 'BUSY';
-    await nextRider.save();
 
     // 3. Send SMS dispatch notification with secure action link
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
@@ -93,10 +90,18 @@ export async function dispatchOrderToNextRider(orderId: string) {
  * Handles Rider Decline: Increments decline count, moves to bottom of queue, re-dispatches.
  */
 export async function handleRiderDecline(orderId: string, riderId: string) {
-  const order = await Order.findById(orderId);
+  // Atomically ensure the order is still assigned to this rider before processing decline
+  const order = await Order.findOneAndUpdate(
+    { _id: orderId, status: 'OFFERED', currentRiderId: riderId },
+    { $set: { status: 'PENDING_ASSIGNMENT', currentRiderId: null, offerExpiresAt: null } },
+    { new: true }
+  );
+
   const rider = await User.findById(riderId);
 
-  if (!order || !rider) return { success: false, error: 'Invalid order or rider.' };
+  if (!order || !rider) {
+    return { success: false, error: 'Invalid order state, or order is no longer assigned to this rider.' };
+  }
 
   // 1. Record decline in order history
   order.assignmentHistory.push({
@@ -104,6 +109,7 @@ export async function handleRiderDecline(orderId: string, riderId: string) {
     action: 'DECLINED',
     timestamp: new Date(),
   });
+  await order.save();
 
   // 2. Increment rider decline count, set status to AVAILABLE, and move to bottom of queue
   rider.status = 'AVAILABLE';
